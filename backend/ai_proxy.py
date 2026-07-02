@@ -9,7 +9,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from auth import current_user, require_admin
+from auth import current_user, has_perm
 from config import AI_KEYS
 from db import User
 
@@ -55,7 +55,9 @@ def providers(_: User = Depends(current_user)) -> dict:
 
 
 @router.post("", response_model=AIResponse)
-async def ask(req: AIRequest, _: User = Depends(require_admin)) -> AIResponse:
+async def ask(req: AIRequest, user: User = Depends(current_user)) -> AIResponse:
+    if not has_perm(user, "ia"):
+        raise HTTPException(403, "Función de IA no habilitada para tu usuario")
     prov = PROVIDERS.get(req.provider)
     if not prov:
         raise HTTPException(400, f"Proveedor desconocido: {req.provider}")

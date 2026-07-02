@@ -23,6 +23,7 @@ class User(SQLModel, table=True):
     email: str = Field(index=True, unique=True)
     password_hash: str
     role: str = "viewer"          # "admin" | "viewer"
+    permissions: str = "[]"       # funciones habilitadas a un viewer (JSON: reportes/solicitudes/links/ia)
     created_at: datetime = Field(default_factory=_now)
 
 
@@ -104,6 +105,17 @@ class Request(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=_now)
 
 
+class Link(SQLModel, table=True):
+    """Un enlace guardado (BI, herramientas, etc.) del banco compartido."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(index=True, foreign_key="user.id")
+    name: str = ""
+    url: str = ""
+    description: str = ""
+    position: int = 0
+    updated_at: datetime = Field(default_factory=_now)
+
+
 class Catalog(SQLModel, table=True):
     """Catálogo por usuario (gerencias, brandpacks, zonas, columnas...) en JSON."""
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -129,7 +141,7 @@ def init_db() -> None:
 # existen, así que añadimos las nuevas a mano si faltan.
 _MIGRATIONS = {
     "request": [("images_json", "TEXT DEFAULT '[]'")],
-    "user": [("role", "TEXT DEFAULT 'viewer'")],
+    "user": [("role", "TEXT DEFAULT 'viewer'"), ("permissions", "TEXT DEFAULT '[]'")],
 }
 
 

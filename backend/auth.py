@@ -87,5 +87,20 @@ def require_admin(user: User = Depends(current_user)) -> User:
     return user
 
 
+# Funciones que un admin puede habilitar a un viewer.
+FEATURES = ["reportes", "solicitudes", "links", "ia"]
+
+
+def has_perm(user: User, key: str) -> bool:
+    """El admin tiene todo; un viewer solo lo que se le habilitó."""
+    if user.role == "admin":
+        return True
+    import json
+    try:
+        return key in json.loads(user.permissions or "[]")
+    except (ValueError, TypeError):
+        return False
+
+
 def get_user_by_email(session: Session, email: str) -> User | None:
     return session.exec(select(User).where(User.email == email)).first()

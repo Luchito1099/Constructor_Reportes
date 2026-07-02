@@ -9,9 +9,10 @@ from typing import Any, Type
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, SQLModel, select
 
-from auth import current_user, require_admin
+from auth import current_user, has_perm, require_admin
 from db import (
     Catalog,
+    Link,
     NotebookTemplate,
     OutputBlock,
     Query,
@@ -50,6 +51,7 @@ WRITABLE = {
     Request: {"fecha_solicitud", "descripcion", "prioridad", "periodo",
               "fecha_limite", "notas", "adjunto_link", "adjunto_file",
               "images_json", "archivado"},
+    Link: {"name", "url", "description", "position"},
 }
 
 
@@ -57,18 +59,31 @@ def _admin_ids(session: Session) -> list[int]:
     return list(session.exec(select(User.id).where(User.role == "admin")).all())
 
 
-def _make_crud(model: Type[SQLModel], path: str, order, shared: bool = False):
+def _make_crud(model: Type[SQLModel], path: str, order,
+               shared: bool = False, perm: str | None = None):
     """Genera list/create/update/delete para un modelo.
 
     - Escrituras (POST/PUT/DELETE): siempre requieren admin.
-    - Lecturas (GET): si ``shared`` es True, cualquier usuario autenticado ve el
-      banco de los admins; si no, solo el admin ve sus propios items.
+    - Lecturas (GET):
+        · ``shared``     → cualquier autenticado ve el banco de los admins.
+        · ``perm``       → lo ven admin o viewers con esa función habilitada
+                           (devuelve el banco compartido de los admins).
+        · ninguno        → solo el admin ve sus propios items.
     """
 
     if shared:
         @router.get(f"/{path}")
         def list_items(user: User = Depends(current_user),
                        session: Session = Depends(get_session)) -> list[dict]:
+            ids = _admin_ids(session)
+            stmt = select(model).where(model.user_id.in_(ids)).order_by(order)
+            return [_dump(x) for x in session.exec(stmt).all()]
+    elif perm:
+        @router.get(f"/{path}")
+        def list_items(user: User = Depends(current_user),
+                       session: Session = Depends(get_session)) -> list[dict]:
+            if not has_perm(user, perm):
+                raise HTTPException(403, "Función no habilitada para tu usuario")
             ids = _admin_ids(session)
             stmt = select(model).where(model.user_id.in_(ids)).order_by(order)
             return [_dump(x) for x in session.exec(stmt).all()]
@@ -96,7 +111,7 @@ def _make_crud(model: Type[SQLModel], path: str, order, shared: bool = False):
                     session: Session = Depends(get_session)) -> dict:
         obj = session.get(model, item_id)
         # admin puede editar cualquier item del banco compartido; en no-compartido, el suyo
-        if not obj or (not shared and obj.user_id != user.id):
+        if not obj or (not shared and not perm and obj.user_id != user.id):
             raise HTTPException(404, "No encontrado")
         for k, v in payload.items():
             if k in WRITABLE[model]:
@@ -112,7 +127,7 @@ def _make_crud(model: Type[SQLModel], path: str, order, shared: bool = False):
                     user: User = Depends(require_admin),
                     session: Session = Depends(get_session)) -> dict:
         obj = session.get(model, item_id)
-        if not obj or (not shared and obj.user_id != user.id):
+        if not obj or (not shared and not perm and obj.user_id != user.id):
             raise HTTPException(404, "No encontrado")
         session.delete(obj)
         session.commit()
@@ -121,12 +136,14 @@ def _make_crud(model: Type[SQLModel], path: str, order, shared: bool = False):
 
 # Banco compartido (lo ven todos, lo escribe el admin):
 _make_crud(Query, "queries", Query.position, shared=True)
-# Recursos privados del admin (viewers no los ven):
+_make_crud(Link, "links", Link.position, perm="links")
+# Módulos habilitables por permiso (los ve admin o viewers con la función):
+_make_crud(ScheduledReport, "scheduled-reports", ScheduledReport.time, perm="reportes")
+_make_crud(Request, "requests", Request.created_at.desc(), perm="solicitudes")
+# Internos del notebook, solo admin:
 _make_crud(NotebookTemplate, "templates", NotebookTemplate.name)
 _make_crud(OutputBlock, "output-blocks", OutputBlock.name)
 _make_crud(Report, "reports", Report.created_at)
-_make_crud(ScheduledReport, "scheduled-reports", ScheduledReport.time)
-_make_crud(Request, "requests", Request.created_at.desc())
 
 
 # --- Catálogo (compartido: el del admin) -------------------------------------

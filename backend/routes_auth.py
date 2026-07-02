@@ -30,6 +30,15 @@ class UserOut(BaseModel):
     id: int
     email: str
     role: str = "viewer"
+    permissions: list[str] = []
+
+
+def _perms(user: User) -> list[str]:
+    import json
+    try:
+        return json.loads(user.permissions or "[]")
+    except (ValueError, TypeError):
+        return []
 
 
 DEFAULT_CATALOG = {
@@ -72,7 +81,7 @@ def register(
         session.add(Catalog(user_id=user.id, data_json=json.dumps(DEFAULT_CATALOG, ensure_ascii=False)))
         session.commit()
     set_session_cookie(response, user.id)
-    return UserOut(id=user.id, email=user.email, role=user.role)
+    return UserOut(id=user.id, email=user.email, role=user.role, permissions=_perms(user))
 
 
 @router.post("/login", response_model=UserOut)
@@ -85,7 +94,7 @@ def login(
     if not user or not verify_password(creds.password, user.password_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Correo o contraseña incorrectos")
     set_session_cookie(response, user.id)
-    return UserOut(id=user.id, email=user.email, role=user.role)
+    return UserOut(id=user.id, email=user.email, role=user.role, permissions=_perms(user))
 
 
 @router.post("/logout")
@@ -96,4 +105,4 @@ def logout(response: Response) -> dict:
 
 @router.get("/me", response_model=UserOut)
 def me(user: User = Depends(current_user)) -> UserOut:
-    return UserOut(id=user.id, email=user.email, role=user.role)
+    return UserOut(id=user.id, email=user.email, role=user.role, permissions=_perms(user))

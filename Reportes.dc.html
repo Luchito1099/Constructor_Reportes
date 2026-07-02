@@ -64,6 +64,13 @@ const PROVIDERS={
 };
 const KWSET=new Set(('SELECT FROM WHERE AND OR NOT IN AS ON JOIN LEFT RIGHT INNER OUTER FULL CROSS GROUP BY ORDER HAVING LIMIT DISTINCT CASE WHEN THEN ELSE END NULL IS LIKE BETWEEN UNION ALL WITH INSERT INTO VALUES UPDATE SET DELETE CREATE OR REPLACE TEMP TEMPORARY VIEW TABLE DESC ASC OVER PARTITION USING EXISTS QUALIFY PIVOT LATERAL EXPLODE').split(' '));
 const uid=()=>Math.random().toString(36).slice(2,9);
+// Funciones que el admin puede habilitar a un viewer (deben coincidir con FEATURES del backend).
+const FEATURES=[
+  {key:'reportes',label:'Reportes por horario',icon:'clock'},
+  {key:'solicitudes',label:'Solicitudes',icon:'inbox'},
+  {key:'links',label:'Links',icon:'link'},
+  {key:'ia',label:'Asistente IA',icon:'spark'}
+];
 const KPICOLORS=['var(--amber)','var(--green)','var(--blue)','var(--purple)','var(--red)'];
 // --- módulo Reportes por horario ---
 const REP_TIPOS=[{id:'corte',label:'Corte',short:'CORTE'},{id:'acumulado',label:'Acumulado',short:'ACUM'},{id:'cierre',label:'Cierre',short:'CIERRE'},{id:'adhoc',label:'Ad-hoc',short:'AD-HOC'}];
@@ -142,6 +149,8 @@ class Component extends DCLogic{
     scheduledReports:[], repEdit:null, repSimMin:null, repFilter:'todos', repNotified:{},
     // módulo 3 (solicitudes)
     requests:[], reqEdit:null, reqSearch:'', reqFilterPri:'todas', reqFrom:'', reqTo:'', imgView:null,
+    // módulo Links
+    links:[], linkEdit:null,
     // administración de usuarios (solo admin)
     users:[],
     toasts:[]
@@ -177,24 +186,30 @@ class Component extends DCLogic{
   }
 
   isAdmin(){ return this.state.user && this.state.user.role==='admin'; }
+  hasPerm(key){ const u=this.state.user; if(!u)return false; if(u.role==='admin')return true; return (u.permissions||[]).includes(key); }
+  moduleAllowed(m){ if(m==='constructor')return true; if(m==='reportes')return this.hasPerm('reportes'); if(m==='pedidos')return this.hasPerm('solicitudes'); if(m==='links')return this.hasPerm('links'); return this.isAdmin(); }
   async loadAll(){
     const get=(path,def)=>this.api('GET',path).catch(e=>{console.warn('load',path,e.message);this._loadErr=(this._loadErr||0)+1;return def;});
     this._loadErr=0;
-    // El banco (queries+catalog) lo ven todos; el resto solo el admin.
+    // El banco (queries+catalog) lo ven todos; el resto según permisos.
     const [queries,catalog]=await Promise.all([get('/queries',[]),get('/catalog',{})]);
-    let templates=[],outputBlocks=[],reports=[],scheduledReports=[],requests=[],avail={};
+    let templates=[],outputBlocks=[],reports=[],scheduledReports=[],requests=[],links=[],avail={};
+    const jobs=[];
+    if(this.hasPerm('reportes'))jobs.push(get('/scheduled-reports',[]).then(x=>scheduledReports=x));
+    if(this.hasPerm('solicitudes'))jobs.push(get('/requests',[]).then(x=>requests=x));
+    if(this.hasPerm('links'))jobs.push(get('/links',[]).then(x=>links=x));
+    if(this.hasPerm('ia'))jobs.push(fetch('/api/ai/providers',{credentials:'same-origin'}).then(r=>r.ok?r.json():{}).catch(()=>({})).then(x=>avail=x));
     if(this.isAdmin()){
-      [templates,outputBlocks,reports,scheduledReports,requests,avail]=await Promise.all([
-        get('/templates',[]),get('/output-blocks',[]),get('/reports',[]),
-        get('/scheduled-reports',[]),get('/requests',[]),
-        fetch('/api/ai/providers',{credentials:'same-origin'}).then(r=>r.ok?r.json():{}).catch(()=>({}))
-      ]);
+      jobs.push(get('/templates',[]).then(x=>templates=x));
+      jobs.push(get('/output-blocks',[]).then(x=>outputBlocks=x));
+      jobs.push(get('/reports',[]).then(x=>reports=x));
     }
+    await Promise.all(jobs);
     let collector=[];try{collector=JSON.parse(localStorage.getItem('rb_collector_'+this.state.user.id)||'[]');}catch(e){}
     const firstProv=Object.keys(avail).find(p=>avail[p])||'anthropic';
     const active=queries[0]?queries[0].id:null;
-    const module=this.isAdmin()?this.state.module:'constructor';
-    this.setState({queries,catalog,templates,outputBlocks,reports,scheduledReports,requests,aiAvail:avail,aiProvider:firstProv,collector,active,module});
+    const module=this.moduleAllowed(this.state.module)?this.state.module:'constructor';
+    this.setState({queries,catalog,templates,outputBlocks,reports,scheduledReports,requests,links,aiAvail:avail,aiProvider:firstProv,collector,active,module});
     this.startClock();
     if(this._loadErr) this.toast('Servidor desactualizado: reinicia uvicorn para cargar los módulos nuevos','err');
   }
@@ -215,6 +230,8 @@ class Component extends DCLogic{
   // ---------- administración de usuarios ----------
   async loadUsers(){ try{const users=await this.api('GET','/admin/users');this.setState({users});}catch(e){this.toast(e.message,'err');} }
   async setUserRole(id,role){ try{const u=await this.api('PUT','/admin/users/'+id+'/role',{role});this.setState(s=>({users:s.users.map(x=>x.id===id?u:x)}));this.toast('Rol actualizado a '+role);}catch(e){this.toast(e.message,'err');} }
+  async setUserPerms(id,perms){ try{const u=await this.api('PUT','/admin/users/'+id+'/permissions',{permissions:perms});this.setState(s=>({users:s.users.map(x=>x.id===id?u:x)}));}catch(e){this.toast(e.message,'err');} }
+  toggleUserPerm(u,key){ const cur=u.permissions||[];const perms=cur.includes(key)?cur.filter(k=>k!==key):[...cur,key];this.setUserPerms(u.id,perms); }
   async removeUser(id){ try{await this.api('DELETE','/admin/users/'+id);this.setState(s=>({users:s.users.filter(x=>x.id!==id)}));this.toast('Usuario eliminado');}catch(e){this.toast(e.message,'err');} }
   openUsers(){ this.setState({modal:'users'}); this.loadUsers(); }
 
@@ -348,7 +365,7 @@ class Component extends DCLogic{
     return {app:h('div',{'data-theme':this.state.theme,style:{height:'100%',display:'flex',background:'var(--bg)'}},
       this.renderModuleNav(),
       h('div',{style:{flex:1,minWidth:0,display:'flex',flexDirection:'column',height:'100%'}},
-        m==='constructor'?this.renderConstructorModule():m==='reportes'?this.renderReportsModule():this.renderRequestsModule()),
+        m==='constructor'?this.renderConstructorModule():m==='reportes'?this.renderReportsModule():m==='links'?this.renderLinksModule():this.renderRequestsModule()),
       m==='constructor'&&this.isAdmin()?this.renderCollectorPill():null,
       this.renderModals(),
       this.state.imgView?this.renderImgView():null,
@@ -374,8 +391,9 @@ class Component extends DCLogic{
       h('nav',{className:'rb-scroll',style:{flex:1,padding:'14px 12px',overflowY:'auto'}},
         h('div',{style:{fontSize:'10px',fontWeight:700,letterSpacing:'.08em',textTransform:'uppercase',color:'#4a6a88',padding:'6px 8px 8px'}},'Herramientas'),
         item('constructor','Constructor','db'),
-        this.isAdmin()?item('reportes','Reportes por horario','clock'):null,
-        this.isAdmin()?item('pedidos','Solicitudes','inbox'):null,
+        this.hasPerm('reportes')?item('reportes','Reportes por horario','clock'):null,
+        this.hasPerm('solicitudes')?item('pedidos','Solicitudes','inbox'):null,
+        this.hasPerm('links')?item('links','Links','link'):null,
         this.isAdmin()?h('div',{key:'sep',style:{height:'1px',background:'rgba(255,255,255,.06)',margin:'10px 8px'}}):null,
         this.isAdmin()?h('button',{key:'users',onClick:()=>this.openUsers(),style:{display:'flex',alignItems:'center',gap:'11px',width:'100%',padding:'10px 12px',fontSize:'13.5px',fontWeight:500,borderRadius:'9px',cursor:'pointer',border:'none',textAlign:'left',color:'var(--sidebar-text)',background:'transparent'},onMouseEnter:e=>e.currentTarget.style.background='var(--sidebar-hover)',onMouseLeave:e=>e.currentTarget.style.background='transparent'},h('span',{style:{display:'flex'}},this.icon('user',18)),'Usuarios'):null),
       h('div',{style:{padding:'12px',borderTop:'1px solid rgba(255,255,255,.06)'}},
@@ -499,7 +517,7 @@ class Component extends DCLogic{
           h('div',{style:{display:'flex',gap:'9px',marginTop:'14px'}},
             this.btn({icon:'play',label:'Generar query',variant:'green',onClick:()=>this.generate(q)}),
             params.length>0?this.btn({label:'Limpiar',variant:'soft',onClick:()=>this.updateQueryLocal(q.id,{params_json:'{}'})}):null))),
-      this.isAdmin()?this.renderChatPanel(q):null);
+      this.hasPerm('ia')?this.renderChatPanel(q):null);
   }
   renderChatPanel(q){const h=React.createElement;const a=this.state.aiState;const qid=q.id;const msgs=this.state.chats[qid]||[];
     const chips=[['Cambia el rango de fechas y bríndame la query final','Cambiar fechas'],['Filtra por otro brandpack y agrupa por gerencia','Otro brandpack'],['Optimiza esta query manteniendo el resultado','Optimizar'],['Explícame paso a paso qué hace','Explicar']];
@@ -889,6 +907,52 @@ class Component extends DCLogic{
           h('img',{src,alt:'captura',style:{position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover'}}),
           h('button',{title:'Quitar',onClick:e=>{e.stopPropagation();this.reqRemoveImage(r,i);},style:{position:'absolute',top:'4px',right:'4px',width:'22px',height:'22px',display:'grid',placeItems:'center',borderRadius:'6px',border:'none',cursor:'pointer',background:'rgba(6,10,16,.6)',color:'#fff'}},this.icon('x',12))))):null); }
 
+  // ================= MÓDULO — LINKS (BI y herramientas) =================
+  async linkCreate(){ try{const l=await this.api('POST','/links',{name:'Nuevo link',url:'',description:'',position:this.state.links.length});this.setState(s=>({links:[...s.links,l],linkEdit:l}));}catch(e){this.toast(e.message,'err');} }
+  linkUpdateLocal(id,patch){ this.setState(s=>({links:s.links.map(l=>l.id===id?Object.assign({},l,patch):l),linkEdit:s.linkEdit&&s.linkEdit.id===id?Object.assign({},s.linkEdit,patch):s.linkEdit})); this._lt=this._lt||{};clearTimeout(this._lt[id]);this._lt[id]=setTimeout(async()=>{try{await this.api('PUT','/links/'+id,patch);}catch(e){this.toast(e.message,'err');}},500); }
+  async linkDelete(id){ try{await this.api('DELETE','/links/'+id);this.setState(s=>({links:s.links.filter(l=>l.id!==id),linkEdit:null}));this.toast('Link eliminado');}catch(e){this.toast(e.message,'err');} }
+  linkHost(u){ try{return new URL(u).host.replace(/^www\./,'');}catch(e){return u||'';} }
+  renderLinksModule(){const h=React.createElement;const admin=this.isAdmin();const links=this.state.links;
+    const right=admin?this.btn({icon:'plus',label:'Nuevo link',variant:'primary',onClick:()=>this.linkCreate()}):null;
+    return [
+      h('div',{key:'tb'},this.moduleTopbar('Links',links.length+' enlaces guardados'+(admin?'':' · solo consulta'),right)),
+      h('div',{key:'bd',className:'rb-scroll',style:{flex:1,overflow:'auto',padding:'22px',background:'var(--bg)'}},
+        h('div',{style:{maxWidth:'1000px',margin:'0 auto'}},
+          links.length===0?h('div',{style:{padding:'50px',textAlign:'center',color:'var(--faint)',background:'var(--panel)',border:'1px solid var(--border)',borderRadius:'14px'}},
+            h('div',{style:{display:'flex',justifyContent:'center',marginBottom:'14px',color:'var(--border2)'}},this.icon('link',46)),
+            h('div',{style:{fontSize:'16px',fontWeight:700,color:'var(--dim)',marginBottom:'6px'}},'Sin links guardados'),
+            h('div',{style:{fontSize:'13px',marginBottom:'16px'}},admin?'Guarda tus enlaces de BI y otras herramientas con nombre y descripción.':'Aún no hay enlaces.'),
+            admin?this.btn({icon:'plus',label:'Nuevo link',variant:'primary',style:{margin:'0 auto'},onClick:()=>this.linkCreate()}):null):
+          h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:'14px'}},links.map(l=>this.linkCard(l,admin)))))
+    ];
+  }
+  linkCard(l,admin){const h=React.createElement;const open=()=>{if(l.url)window.open(l.url,'_blank');};
+    return h('div',{key:l.id,style:{background:'var(--panel)',border:'1px solid var(--border)',borderRadius:'13px',boxShadow:'var(--shadow-s)',overflow:'hidden',display:'flex',flexDirection:'column'}},
+      h('div',{onClick:open,style:{padding:'15px 16px',cursor:l.url?'pointer':'default',flex:1}},
+        h('div',{style:{display:'flex',alignItems:'center',gap:'10px',marginBottom:'8px'}},
+          h('div',{style:{width:'36px',height:'36px',borderRadius:'9px',background:'color-mix(in srgb,var(--amber) 14%,var(--panel))',display:'grid',placeItems:'center',color:'var(--amber)',flex:'none'}},this.icon('link',18)),
+          h('div',{style:{minWidth:0,flex:1}},h('div',{style:{fontSize:'14px',fontWeight:700,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},l.name||'(sin nombre)'),h('div',{style:{fontSize:'11px',color:'var(--blue)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},this.linkHost(l.url)||'sin URL'))),
+        l.description?h('div',{style:{fontSize:'12.5px',color:'var(--dim)',lineHeight:1.5}},l.description):null),
+      h('div',{style:{display:'flex',gap:'6px',padding:'9px 12px',borderTop:'1px solid var(--border)',background:'var(--panel2)'}},
+        this.btn({icon:'link',label:'Abrir',variant:'ghost',pad:'6px 11px',onClick:open,style:{opacity:l.url?1:.5}}),
+        h('div',{style:{flex:1}}),
+        admin?this.btn({icon:'edit',variant:'soft',pad:'6px',isz:15,title:'Editar',onClick:()=>this.setState({linkEdit:l})}):null,
+        admin?this.btn({icon:'trash',variant:'danger',pad:'6px',isz:15,title:'Eliminar',onClick:()=>this.linkDelete(l.id)}):null));
+  }
+  renderLinkEditor(){const h=React.createElement;const l=this.state.linkEdit;if(!l)return null;
+    const fld=(label,node)=>h('label',{style:{display:'flex',flexDirection:'column',gap:'6px'}},h('span',{style:{fontSize:'12px',fontWeight:600,color:'var(--dim)'}},label),node);
+    const inp=(props)=>h('input',Object.assign({style:{padding:'10px 12px',background:'var(--panel2)',border:'1px solid var(--border)',borderRadius:'9px',color:'var(--text)',fontSize:'13px',outline:'none'},onFocus:e=>e.target.style.borderColor='var(--amber)',onBlur:e=>e.target.style.borderColor='var(--border)'},props));
+    return this.overlay(()=>this.setState({linkEdit:null}),h('div',null,
+      this.modalHeadX('Link','nombre, URL y descripción',()=>this.setState({linkEdit:null})),
+      h('div',{style:{padding:'20px',display:'flex',flexDirection:'column',gap:'15px'}},
+        fld('Nombre',inp({value:l.name,onChange:e=>this.linkUpdateLocal(l.id,{name:e.target.value}),placeholder:'Ej. Tablero BI Ventas'})),
+        fld('URL',inp({value:l.url,onChange:e=>this.linkUpdateLocal(l.id,{url:e.target.value}),placeholder:'https://…'})),
+        fld('Descripción',h('textarea',{value:l.description,onChange:e=>this.linkUpdateLocal(l.id,{description:e.target.value}),placeholder:'para qué sirve, qué contiene…',style:{minHeight:'70px',resize:'vertical',padding:'11px 13px',background:'var(--panel2)',border:'1px solid var(--border)',borderRadius:'9px',color:'var(--text)',fontSize:'13px',lineHeight:1.5,outline:'none'}})),
+        h('div',{style:{display:'flex',justifyContent:'space-between',marginTop:'4px'}},
+          this.btn({icon:'trash',label:'Eliminar',variant:'danger',onClick:()=>this.linkDelete(l.id)}),
+          this.btn({icon:'check',label:'Guardar',variant:'primary',onClick:()=>this.setState({linkEdit:null})})))));
+  }
+
   // ---------- helpers de modal reutilizables ----------
   overlay(close,body){const h=React.createElement;return h('div',{onClick:close,style:{position:'fixed',inset:0,background:'var(--ovl)',backdropFilter:'blur(3px)',display:'grid',placeItems:'center',zIndex:120,padding:'24px'}},
     h('div',{onClick:e=>e.stopPropagation(),className:'rb-pop rb-scroll',style:{background:'var(--panel)',border:'1px solid var(--border2)',borderRadius:'16px',boxShadow:'var(--shadow)',width:'min(560px,100%)',maxHeight:'88vh',overflow:'auto'}},body));}
@@ -898,6 +962,7 @@ class Component extends DCLogic{
   renderModals(){const h=React.createElement;
     if(this.state.repEdit)return this.renderRepEditor();
     if(this.state.reqEdit)return this.renderReqEditor();
+    if(this.state.linkEdit)return this.renderLinkEditor();
     const m=this.state.modal;if(!m)return null;const close=()=>this.setState({modal:null});
     let body;if(m==='ai')body=this.modalAI();else if(m==='catalog')body=this.modalCatalog();else if(m==='templates')body=this.modalTemplates();else if(m==='repsettings')body=this.modalRepSettings();else if(m==='users')body=this.modalUsers();
     return h('div',{onClick:close,style:{position:'fixed',inset:0,background:'var(--ovl)',backdropFilter:'blur(3px)',display:'grid',placeItems:'center',zIndex:100,padding:'24px'}},
@@ -949,14 +1014,20 @@ class Component extends DCLogic{
           'Los usuarios se registran solos y entran como ',h('b',null,'solo consulta'),' (ven y usan el banco de queries, sin editarlo). Aquí los promueves a ',h('b',null,'administrador'),' o los quitas.'),
         users.length===0?h('div',{style:{textAlign:'center',color:'var(--faint)',fontSize:'13px',padding:'16px'}},'Cargando…'):
         users.map(u=>{const isMe=u.id===me.id;const admin=u.role==='admin';
-          return h('div',{key:u.id,style:{display:'flex',alignItems:'center',gap:'11px',padding:'11px 13px',background:'var(--panel2)',border:'1px solid var(--border)',borderRadius:'11px'}},
-            h('div',{style:{width:'34px',height:'34px',borderRadius:'50%',background:admin?'var(--amber)':'var(--panelhi)',display:'grid',placeItems:'center',fontSize:'14px',fontWeight:700,color:admin?'#fff':'var(--dim)',flex:'none'}},(u.email[0]||'?').toUpperCase()),
-            h('div',{style:{flex:1,minWidth:0}},h('div',{style:{fontSize:'13px',fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},u.email,isMe?h('span',{style:{fontSize:'10px',color:'var(--faint)',marginLeft:'6px'}},'(tú)'):null),
-              h('span',{style:{fontSize:'10.5px',fontWeight:700,color:admin?'var(--amber)':'var(--faint)'}},admin?'ADMINISTRADOR':'SOLO CONSULTA')),
+          return h('div',{key:u.id,style:{display:'flex',flexDirection:'column',gap:'11px',padding:'12px 13px',background:'var(--panel2)',border:'1px solid var(--border)',borderRadius:'11px'}},
+            h('div',{style:{display:'flex',alignItems:'center',gap:'11px'}},
+              h('div',{style:{width:'34px',height:'34px',borderRadius:'50%',background:admin?'var(--amber)':'var(--panelhi)',display:'grid',placeItems:'center',fontSize:'14px',fontWeight:700,color:admin?'#fff':'var(--dim)',flex:'none'}},(u.email[0]||'?').toUpperCase()),
+              h('div',{style:{flex:1,minWidth:0}},h('div',{style:{fontSize:'13px',fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},u.email,isMe?h('span',{style:{fontSize:'10px',color:'var(--faint)',marginLeft:'6px'}},'(tú)'):null),
+                h('span',{style:{fontSize:'10.5px',fontWeight:700,color:admin?'var(--amber)':'var(--faint)'}},admin?'ADMINISTRADOR':'SOLO CONSULTA')),
+              admin
+                ?this.btn({icon:'user',label:'Quitar admin',variant:'ghost',pad:'6px 10px',onClick:()=>this.setUserRole(u.id,'viewer')})
+                :this.btn({icon:'check',label:'Hacer admin',variant:'primary',pad:'6px 10px',onClick:()=>this.setUserRole(u.id,'admin')}),
+              !isMe?this.btn({icon:'trash',variant:'danger',pad:'6px',isz:15,title:'Eliminar usuario',onClick:()=>this.removeUser(u.id)}):null),
             admin
-              ?this.btn({icon:'user',label:'Quitar admin',variant:'ghost',pad:'6px 10px',onClick:()=>this.setUserRole(u.id,'viewer')})
-              :this.btn({icon:'check',label:'Hacer admin',variant:'primary',pad:'6px 10px',onClick:()=>this.setUserRole(u.id,'admin')}),
-            !isMe?this.btn({icon:'trash',variant:'danger',pad:'6px',isz:15,title:'Eliminar usuario',onClick:()=>this.removeUser(u.id)}):null);
+              ?h('div',{style:{paddingLeft:'45px',fontSize:'11px',color:'var(--faint)'}},'Acceso total a todas las funciones')
+              :h('div',{style:{paddingLeft:'45px'}},
+                h('div',{style:{fontSize:'10.5px',fontWeight:600,color:'var(--faint)',marginBottom:'6px'}},'FUNCIONES HABILITADAS (además del Constructor)'),
+                h('div',{style:{display:'flex',flexWrap:'wrap',gap:'6px'}},FEATURES.map(f=>{const on=(u.permissions||[]).includes(f.key);return h('button',{key:f.key,onClick:()=>this.toggleUserPerm(u,f.key),style:{display:'flex',alignItems:'center',gap:'5px',padding:'5px 10px',fontSize:'11.5px',fontWeight:600,borderRadius:'16px',cursor:'pointer',border:'1px solid '+(on?'var(--green)':'var(--border)'),background:on?'color-mix(in srgb,var(--green) 13%,transparent)':'var(--panel)',color:on?'var(--green)':'var(--dim)'}},this.icon(on?'check':f.icon,12),f.label);}))));
         }),
         h('div',{style:{display:'flex',justifyContent:'flex-end',marginTop:'4px'}},this.btn({label:'Listo',variant:'primary',onClick:()=>this.setState({modal:null})}))));
   }

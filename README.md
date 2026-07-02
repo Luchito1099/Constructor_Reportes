@@ -14,6 +14,8 @@ lateral:
 3. **Solicitudes** — historial de lo que te piden: fecha de solicitud, descripción,
    prioridad, periodo/fecha límite, notas, adjunto (enlace) y **capturas de pantalla**
    (pega con Ctrl+V, arrastra o sube), con buscador y filtros por prioridad y por fecha.
+4. **Links** — guarda tus enlaces de BI y otras herramientas con **nombre, URL y
+   descripción**; se abren en un clic (banco compartido con el equipo).
 
 Las API keys de IA viven **solo en el servidor**, nunca en el navegador. La estética usa la
 paleta del Dashboard (teal + sidebar navy + fondo claro, fuente *Plus Jakarta Sans*), con
@@ -29,9 +31,12 @@ modo claro/oscuro.
   ni ver Reportes/Solicitudes.
 
 El **primer usuario** que se registra queda **administrador**; el resto entra como *solo
-consulta*. Desde el menú **Usuarios** (solo admin) promueves o quitas administradores. La
-seguridad se aplica en el backend: un viewer recibe **403** en cualquier escritura. El
-**banco de queries y el catálogo son compartidos** (todos ven los del admin).
+consulta*. Desde el menú **Usuarios** (solo admin) promueves/quitas administradores y, por
+cada viewer, **habilitas funciones** con un clic: *Reportes por horario*, *Solicitudes*,
+*Links* y *Asistente IA* (además del Constructor, que siempre ven). La seguridad se aplica
+en el backend: un viewer recibe **403** en cualquier escritura o en funciones no
+habilitadas. El **banco de queries, el catálogo y los links son compartidos** (todos ven
+los del admin).
 
 ---
 
@@ -44,7 +49,7 @@ seguridad se aplica en el backend: un viewer recibe **403** en cualquier escritu
 
 ```
 Reportes.dc.html · support.js        frontend (lo sirve el backend)
-Dockerfile · docker-compose.yml      despliegue de un comando
+Dockerfile · docker-compose.yaml     despliegue de un comando (Coolify/Docker)
 backend/
   main.py         app FastAPI + sirve el frontend
   config.py       lee variables de entorno / .env
@@ -137,6 +142,12 @@ docker compose up -d --build
 Queda escuchando en el puerto **8000**. La base y las capturas se guardan en el volumen
 `rbdata` (persisten aunque recrees el contenedor). Para actualizar: `git pull && docker
 compose up -d --build`.
+
+**Con Coolify**: crea un recurso con **Build Pack = Docker Compose**, apunta al repo, deja
+*Base Directory* = `/` y *Docker Compose Location* = `/docker-compose.yaml`. En
+**Environment Variables** pon `RB_SESSION_SECRET` y tus API keys; en **Persistent Storage**
+Coolify mantiene el volumen `rbdata`. Asigna un **dominio** al servicio `web` (Coolify lo
+enruta al puerto 8000 con HTTPS) y deja `RB_COOKIE_SECURE=1`.
 
 ### Opción B — Sin Docker (uvicorn/gunicorn)
 
