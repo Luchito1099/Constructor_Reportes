@@ -133,21 +133,25 @@ git push -u origin main
 
 En el VPS, con Docker instalado:
 
+**Con Coolify (recomendado):** crea un recurso con **Build Pack = Docker Compose**, apunta
+al repo, deja *Base Directory* = `/` y *Docker Compose Location* = `/docker-compose.yaml`. En
+**Environment Variables** pon `RB_SESSION_SECRET` y tus API keys; en **Persistent Storage**
+Coolify mantiene el volumen `rbdata`. Asigna un **dominio** al servicio `web` (su proxy lo
+enruta al puerto interno 8000 con HTTPS) y deja `RB_COOKIE_SECURE=1`. El compose usa
+`expose` (no `ports`) para no chocar con el proxy de Coolify.
+
+**Docker en un host propio (sin proxy):** como el compose no publica puertos, mapea el
+puerto al levantarlo:
+
 ```bash
 git clone <tu-repo> && cd <repo>
 cp .env.example .env          # edita RB_SESSION_SECRET, RB_COOKIE_SECURE=1 y tus API keys
 docker compose up -d --build
+docker compose run ...        # o añade "ports: [8000:8000]" y pon Nginx delante
 ```
 
-Queda escuchando en el puerto **8000**. La base y las capturas se guardan en el volumen
-`rbdata` (persisten aunque recrees el contenedor). Para actualizar: `git pull && docker
-compose up -d --build`.
-
-**Con Coolify**: crea un recurso con **Build Pack = Docker Compose**, apunta al repo, deja
-*Base Directory* = `/` y *Docker Compose Location* = `/docker-compose.yaml`. En
-**Environment Variables** pon `RB_SESSION_SECRET` y tus API keys; en **Persistent Storage**
-Coolify mantiene el volumen `rbdata`. Asigna un **dominio** al servicio `web` (Coolify lo
-enruta al puerto 8000 con HTTPS) y deja `RB_COOKIE_SECURE=1`.
+La base y las capturas se guardan en el volumen `rbdata` (persisten aunque recrees el
+contenedor). Para actualizar: `git pull && docker compose up -d --build`.
 
 ### Opción B — Sin Docker (uvicorn/gunicorn)
 

@@ -14,12 +14,10 @@ services:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
       - RB_ALLOW_REGISTER=${RB_ALLOW_REGISTER:-1}
       - RB_COOKIE_SECURE=${RB_COOKIE_SECURE:-1}
-    # expose = puerto interno que Coolify enruta desde tu dominio (con HTTPS).
+    # expose = puerto interno; Coolify enruta tu dominio aquí (con HTTPS).
+    # NO uses "ports:" en Coolify — su proxy ya publica el 80/443 y chocaría.
     expose:
       - "8000"
-    # ports = publica también en el host (útil para probar sin dominio).
-    ports:
-      - "8000:8000"
     volumes:
       - rbdata:/data        # persiste la base SQLite y las capturas
     restart: unless-stopped
