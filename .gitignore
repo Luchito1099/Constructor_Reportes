@@ -1,0 +1,16 @@
+# Secretos y datos — NUNCA subir
+.env
+backend/.env
+backend/report_builder.db
+*.db
+/data/
+
+# Python
+__pycache__/
+*.pyc
+backend/.venv/
+.venv/
+
+# Sistema
+.DS_Store
+Thumbs.db
