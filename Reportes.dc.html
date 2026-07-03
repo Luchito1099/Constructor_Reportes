@@ -148,6 +148,7 @@ class Component extends DCLogic{
     active:null, gen:{}, chats:{}, aiState:{loading:false,error:'',prompt:''},
     aiProvider:'anthropic', aiAvail:{}, sidebar:true,
     collector:[], drag:null, pieceDrag:null, catDrag:null, catInput:null, listDraft:{},
+    catSearch:'', catGroupInput:null,
     vw:(typeof window!=='undefined'?window.innerWidth:1200), navOpen:false,
     nb:{templateId:null,name:'Reporte sin título',pieces:[],finalTable:'',outputs:[],viz:{type:'barras'}},
     // módulo 2 (reportes por horario)
@@ -265,18 +266,27 @@ class Component extends DCLogic{
     return order.map(n=>({name:n,kind:kinds[n]})); }
   // Expande la plantilla con los valores: repite bloques, opcionales, listas y valores.
   expandSql(sql,vals){ const q=(x)=>"'"+String(x).replace(/'/g,"''")+"'";
-    const arr=(name)=>{let v=vals[name];if(Array.isArray(v))return v.map(x=>String(x).trim()).filter(Boolean);if(v==null||v==='')return [];return String(v).split(/[\n,]/).map(s=>s.trim()).filter(Boolean);};
-    const has=(name)=>{const v=vals[name];if(Array.isArray(v))return v.some(x=>String(x).trim()!=='');return v!=null&&String(v).trim()!=='';};
+    const iv=(it)=>(it&&typeof it==='object')?(it.v==null?'':it.v):it;   // valor del item
+    const inm=(it)=>(it&&typeof it==='object')?(it.n==null?'':it.n):'';  // nombre del item
+    const items=(name)=>{let v=vals[name];if(Array.isArray(v))return v.filter(x=>String(iv(x)).trim()!=='');if(v==null||v==='')return [];return String(v).split(/[\n,]/).map(s=>s.trim()).filter(Boolean);};
+    const arr=(name)=>items(name).map(x=>String(iv(x)).trim());
+    const has=(name)=>items(name).length>0;
     let out=sql||'';
-    out=out.replace(/\{#(\w+)\}([\s\S]*?)\{\/\1\}/g,(mm,name,body)=>{const a=arr(name);if(!a.length)return '';return a.map((v,i)=>body.replace(/\{\.\}/g,v).replace(/\{@i\}/g,String(i+1))).join('');});
+    out=out.replace(/\{#(\w+)\}([\s\S]*?)\{\/\1\}/g,(mm,name,body)=>{const a=items(name);if(!a.length)return '';return a.map((it,i)=>body.replace(/\{\.n\}/g,String(inm(it))).replace(/\{\.\}/g,String(iv(it))).replace(/\{@i\}/g,String(i+1))).join('');});
     out=out.replace(/\{\?(\w+)\}([\s\S]*?)\{\/\1\}/g,(mm,name,body)=>has(name)?body:'');
     out=out.replace(/\{(\w+)\[\]\}/g,(mm,name)=>{const a=arr(name);return a.length?a.map(q).join(','):mm;});
     out=out.replace(/\{(\w+)\[#\]\}/g,(mm,name)=>{const a=arr(name);return a.length?a.join(','):mm;});
-    out=out.replace(/\{(\w+)\}/g,(mm,name)=>{const v=vals[name];return (v!=null&&v!=='')?(Array.isArray(v)?v.map(q).join(','):v):mm;});
+    out=out.replace(/\{(\w+)\}/g,(mm,name)=>{const v=vals[name];if(Array.isArray(v)){const a=arr(name);return a.length?a.map(q).join(','):mm;}return (v!=null&&v!=='')?v:mm;});
     return out; }
   catalogFor(name){const n=name.toLowerCase();const c=this.state.catalog;const pick=(k)=>c[k]&&c[k].length?c[k]:null;
     if(/geren/.test(n))return pick('gerencias');if(/brand|pack/.test(n))return pick('brandpacks');if(/combo/.test(n))return pick('combos');
-    if(/material/.test(n))return pick('materiales');if(/zona/.test(n))return pick('zonas');if(/promo/.test(n))return pick('promos');return null;}
+    if(/material/.test(n))return pick('materiales');if(/zona/.test(n))return pick('zonas');if(/promo/.test(n))return pick('promos');
+    // fallback genérico: casa el nombre del parámetro con cualquier grupo del catálogo
+    for(const k of Object.keys(c)){ if(k==='categorias'||k[0]==='_'||!Array.isArray(c[k])||!c[k].length)continue; const kl=k.toLowerCase(),sing=kl.replace(/s$/,''); if(n.includes(kl)||n.includes(sing)||kl.includes(n))return c[k]; }
+    return null;}
+  catalogGroups(){const c=this.state.catalog;const fixed=['gerencias','brandpacks','combos','materiales','zonas','promos','tablas','columnas'];
+    const custom=Object.keys(c).filter(k=>k!=='categorias'&&k[0]!=='_'&&Array.isArray(c[k])&&!fixed.includes(k));
+    return {fixed,custom};}
   categories(){const set=[];(this.state.catalog.categorias||[]).forEach(c=>{if(!set.includes(c))set.push(c);});this.state.queries.forEach(q=>{if(q.category&&!set.includes(q.category))set.push(q.category);});if(!set.length)set.push('GENERAL');return set;}
 
   // ---------- queries CRUD ----------
@@ -342,7 +352,7 @@ class Component extends DCLogic{
       +'- {var}        valor único.\n'
       +'- {var[]}      lista con comillas → \'a\',\'b\',\'c\' (ideal para IN (...)).\n'
       +'- {var[#]}     lista numérica → 1,2,3.\n'
-      +'- {#var}...{/var}   repite el bloque por cada valor de la lista var; dentro {.} es el valor y {@i} el índice (ideal para CASE WHEN).\n'
+      +'- {#var}...{/var}   repite el bloque por cada valor de la lista var; dentro {.} es el valor, {@i} el índice y {.n} el nombre del valor (si la lista es "con nombre").\n'
       +'- {?var}...{/var}   bloque opcional: solo aparece si var tiene valor.\n';
     const ctx=q&&q.context&&q.context.trim()?('\nCONTEXTO DE ESTA QUERY (dado por el usuario):\n'+q.context.trim()+'\n'):'';
     const sys='Eres un experto en SQL para Databricks (Spark SQL) y reportería comercial. Responde en español, claro. Cuando generes SQL enciérralo en un bloque ```sql.\n\n'+SIMB+'\nCATÁLOGO:\n'+['tablas','columnas','gerencias','brandpacks','combos','materiales','zonas','promos'].map(catLine).join('')+ctx+'\nQUERY ACTUAL:\n'+(q?q.sql:'(ninguna)');
@@ -626,20 +636,46 @@ class Component extends DCLogic{
         h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px'}},field(dateParams[0]),field(dateParams[1]))):null,
       rest.length?h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(190px,1fr))',gap:'12px'}},rest.map(s=>s.kind==='single'?field(s.name):this.renderListField(q,s.name,s.kind,vals))):null);
   }
-  renderListField(q,name,kind,vals){const h=React.createElement;const dk=q.id+'|'+name;const draft=this.state.listDraft[dk]||'';
+  setListNamed(q,name,on){ let params={};try{params=JSON.parse(q.params_json||'{}');}catch(e){}
+    let cur=params[name];if(!Array.isArray(cur))cur=cur?String(cur).split(/[\n,]/).map(s=>s.trim()).filter(Boolean):[];
+    params[name]=on?cur.map(x=>(x&&typeof x==='object')?x:{v:String(x),n:''}):cur.map(x=>(x&&typeof x==='object')?String(x.v||''):String(x));
+    params.__named=Object.assign({},params.__named||{},{[name]:!!on});
+    this.updateQueryLocal(q.id,{params_json:JSON.stringify(params)}); }
+  renderListField(q,name,kind,vals){const h=React.createElement;const dk=q.id+'|'+name;
+    const named=!!((vals.__named||{})[name]);
     let items=vals[name];if(!Array.isArray(items))items=items?String(items).split(/[\n,]/).map(s=>s.trim()).filter(Boolean):[];
+    const iv=(it)=>(it&&typeof it==='object')?(it.v||''):it;const inm=(it)=>(it&&typeof it==='object')?(it.n||''):'';
     const setItems=(a)=>this.setParam(q.id,name,a);
-    const setDraft=(v)=>this.setState(s=>({listDraft:Object.assign({},s.listDraft,{[dk]:v})}));
-    const commit=()=>{const v=(this.state.listDraft[dk]||'').trim();if(!v)return;setItems([...items,v]);setDraft('');};
+    const setDraft=(k,v)=>this.setState(s=>({listDraft:Object.assign({},s.listDraft,{[k]:v})}));
+    const draftV=this.state.listDraft[dk]||'';const draftN=this.state.listDraft[dk+'::n']||'';
+    const commit=()=>{const v=String(draftV).trim();if(!v)return;setItems([...items,named?{v,n:String(draftN).trim()}:v]);setDraft(dk,'');setDraft(dk+'::n','');};
     const list=this.catalogFor(name);const lid='dll_'+q.id+'_'+name;
-    return h('div',{key:name,style:{gridColumn:'1 / -1',display:'flex',flexDirection:'column',gap:'5px'}},
-      h('div',{style:{display:'flex',alignItems:'center',gap:'8px'}},
-        h('span',{className:'rb-mono',style:{fontSize:'11px',color:'var(--param)',fontWeight:600}},'{'+name+(kind==='listnum'?'[#]':'[]')+'}'),
-        h('span',{style:{fontSize:'10px',color:'var(--faint)'}},kind==='listnum'?'lista de números → 1,2,3':"lista → 'a','b','c'"),
-        h('span',{style:{marginLeft:'auto',fontSize:'10px',color:'var(--faint)'}},items.length+' valor'+(items.length===1?'':'es'))),
+    const inpS={flex:1,minWidth:0,padding:'6px 8px',background:'var(--panel)',border:'1px solid var(--border)',borderRadius:'7px',color:'var(--text)',fontSize:'12px',outline:'none'};
+    const toggle=h('button',{onClick:()=>this.setListNamed(q,name,!named),title:'Cada valor con su nombre (para alias en repeat: {.n})',style:{display:'flex',alignItems:'center',gap:'5px',padding:'3px 9px',fontSize:'10.5px',fontWeight:600,borderRadius:'14px',cursor:'pointer',border:'1px solid '+(named?'var(--green)':'var(--border)'),background:named?'color-mix(in srgb,var(--green) 13%,transparent)':'var(--panel)',color:named?'var(--green)':'var(--dim)'}},this.icon(named?'check':'plus',11),'con nombre');
+    const header=h('div',{style:{display:'flex',alignItems:'center',gap:'8px',flexWrap:'wrap'}},
+      h('span',{className:'rb-mono',style:{fontSize:'11px',color:'var(--param)',fontWeight:600}},'{'+name+(kind==='listnum'?'[#]':'[]')+'}'),
+      h('span',{style:{fontSize:'10px',color:'var(--faint)'}},kind==='listnum'?'números → 1,2,3':"lista → 'a','b','c'"),
+      toggle,
+      h('span',{style:{marginLeft:'auto',fontSize:'10px',color:'var(--faint)'}},items.length+' valor'+(items.length===1?'':'es')));
+    if(named){
+      return h('div',{key:name,style:{gridColumn:'1 / -1',display:'flex',flexDirection:'column',gap:'6px'}},header,
+        h('div',{style:{display:'flex',flexDirection:'column',gap:'6px',padding:'8px',background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:'8px'}},
+          items.map((it,i)=>h('div',{key:i,style:{display:'flex',gap:'6px',alignItems:'center'}},
+            h('input',{value:iv(it),list:list?lid:undefined,placeholder:'valor',onChange:e=>{const a=items.slice();const o=(typeof a[i]==='object')?a[i]:{v:a[i],n:''};a[i]=Object.assign({},o,{v:e.target.value});setItems(a);},style:inpS}),
+            h('span',{style:{color:'var(--faint)',fontSize:'12px'}},'→'),
+            h('input',{value:inm(it),placeholder:'nombre (alias)',onChange:e=>{const a=items.slice();const o=(typeof a[i]==='object')?a[i]:{v:a[i],n:''};a[i]=Object.assign({},o,{n:e.target.value});setItems(a);},style:inpS}),
+            h('button',{title:'quitar',onClick:()=>setItems(items.filter((_,j)=>j!==i)),style:{border:'none',background:'none',cursor:'pointer',color:'var(--faint)',display:'flex',padding:'4px'}},this.icon('x',13)))),
+          h('div',{style:{display:'flex',gap:'6px',alignItems:'center'}},
+            h('input',{value:draftV,list:list?lid:undefined,placeholder:'valor',onChange:e=>setDraft(dk,e.target.value),onKeyDown:e=>{if(e.key==='Enter'){e.preventDefault();commit();}},style:inpS}),
+            h('span',{style:{color:'var(--faint)',fontSize:'12px'}},'→'),
+            h('input',{value:draftN,placeholder:'nombre (alias)',onChange:e=>setDraft(dk+'::n',e.target.value),onKeyDown:e=>{if(e.key==='Enter'){e.preventDefault();commit();}},style:inpS}),
+            this.btn({icon:'plus',variant:'ghost',pad:'6px 9px',isz:13,title:'Agregar',onClick:()=>commit()}))),
+        list?h('datalist',{id:lid},list.map(o=>h('option',{key:o,value:o}))):null);
+    }
+    return h('div',{key:name,style:{gridColumn:'1 / -1',display:'flex',flexDirection:'column',gap:'5px'}},header,
       h('div',{style:{display:'flex',flexWrap:'wrap',gap:'5px',padding:'7px',background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:'8px'}},
-        items.map((it,i)=>h('span',{key:i,style:{display:'inline-flex',alignItems:'center',gap:'5px',padding:'3px 8px',background:'var(--panel)',border:'1px solid var(--border2)',borderRadius:'14px',fontSize:'11.5px',fontWeight:600}},it,h('button',{title:'quitar',onClick:()=>setItems(items.filter((_,j)=>j!==i)),style:{border:'none',background:'none',cursor:'pointer',color:'var(--faint)',display:'flex',padding:0}},this.icon('x',11)))),
-        h('input',{value:draft,list:list?lid:undefined,placeholder:items.length?'+ otro…':'agrega y Enter',onChange:e=>setDraft(e.target.value),onKeyDown:e=>{if(e.key==='Enter'||e.key===','){e.preventDefault();commit();}},onBlur:()=>commit(),style:{flex:1,minWidth:'90px',border:'none',background:'none',outline:'none',color:'var(--text)',fontSize:'12px'}}),
+        items.map((it,i)=>h('span',{key:i,style:{display:'inline-flex',alignItems:'center',gap:'5px',padding:'3px 8px',background:'var(--panel)',border:'1px solid var(--border2)',borderRadius:'14px',fontSize:'11.5px',fontWeight:600}},iv(it),h('button',{title:'quitar',onClick:()=>setItems(items.filter((_,j)=>j!==i)),style:{border:'none',background:'none',cursor:'pointer',color:'var(--faint)',display:'flex',padding:0}},this.icon('x',11)))),
+        h('input',{value:draftV,list:list?lid:undefined,placeholder:items.length?'+ otro…':'agrega y Enter',onChange:e=>setDraft(dk,e.target.value),onKeyDown:e=>{if(e.key==='Enter'||e.key===','){e.preventDefault();commit();}},onBlur:()=>commit(),style:{flex:1,minWidth:'90px',border:'none',background:'none',outline:'none',color:'var(--text)',fontSize:'12px'}}),
         this.btn({icon:'plus',variant:'ghost',pad:'4px 8px',isz:13,title:'Agregar',onClick:()=>commit()})),
       list?h('datalist',{id:lid},list.map(o=>h('option',{key:o,value:o}))):null);
   }
@@ -1054,14 +1090,35 @@ class Component extends DCLogic{
           h('pre',{className:'rb-mono',style:{margin:'8px 0 0',fontSize:'11.5px',color:'var(--amber)',whiteSpace:'pre-wrap'}},'ANTHROPIC_API_KEY=sk-ant-...\nOPENAI_API_KEY=sk-...\nDEEPSEEK_API_KEY=sk-...')),
         h('div',{style:{display:'flex',justifyContent:'flex-end'}},this.btn({label:'Entendido',variant:'primary',onClick:()=>this.setState({modal:null})}))));
   }
-  modalCatalog(){const h=React.createElement;const cat=this.state.catalog;const groups=[['gerencias','Gerencias'],['brandpacks','Brandpacks'],['combos','Combos'],['materiales','Materiales'],['zonas','Zonas'],['promos','Promos'],['tablas','Tablas'],['columnas','Columnas']];
+  catGroupLabel(k){const M={gerencias:'Gerencias',brandpacks:'Brandpacks',combos:'Combos',materiales:'Materiales',zonas:'Zonas',promos:'Promos',tablas:'Tablas',columnas:'Columnas'};return M[k]||k;}
+  addCatGroup(){const name=(this.state.catGroupInput||'').trim();if(!name){this.setState({catGroupInput:null});return;}
+    const key=name.toLowerCase().replace(/[^a-z0-9_]+/g,'_').replace(/^_+|_+$/g,'')||('grupo_'+uid());
+    if(this.state.catalog[key]!==undefined){this.setState({catGroupInput:null});this.toast('Ese grupo ya existe','err');return;}
+    this.setState(st=>({catalog:Object.assign({},st.catalog,{[key]:[]}),catGroupInput:null}));this.toast('Grupo "'+key+'" creado — recuerda Guardar');}
+  delCatGroup(k){this.setState(st=>{const c=Object.assign({},st.catalog);delete c[k];return{catalog:c};});}
+  modalCatalog(){const h=React.createElement;const cat=this.state.catalog;const q=(this.state.catSearch||'').trim().toLowerCase();
+    const {fixed,custom}=this.catalogGroups();const keys=[...fixed,...custom];
     const setGroup=(k,txt)=>this.setState(st=>({catalog:Object.assign({},st.catalog,{[k]:txt.split('\n').map(x=>x.trim()).filter(Boolean)})}));
+    const match=(k)=>!q||k.toLowerCase().includes(q)||this.catGroupLabel(k).toLowerCase().includes(q)||(cat[k]||[]).some(v=>String(v).toLowerCase().includes(q));
+    const shown=keys.filter(match);
+    const groupCard=(k)=>{const isCustom=custom.includes(k);
+      return h('label',{key:k,style:{display:'flex',flexDirection:'column',gap:'6px'}},
+        h('div',{style:{display:'flex',alignItems:'center',gap:'6px'}},
+          h('span',{style:{fontSize:'12px',fontWeight:600,color:'var(--dim)',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},this.catGroupLabel(k)+' ('+((cat[k]||[]).length)+')'),
+          isCustom?h('button',{title:'Eliminar grupo',onClick:e=>{e.preventDefault();this.delCatGroup(k);},style:{border:'none',background:'none',cursor:'pointer',color:'var(--faint)',display:'flex',padding:'2px'}},this.icon('trash',13)):null),
+        h('textarea',{value:(cat[k]||[]).join('\n'),onChange:e=>setGroup(k,e.target.value),className:'rb-scroll',style:{minHeight:'84px',resize:'vertical',padding:'9px 11px',background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:'9px',color:'var(--text)',fontSize:'12px',lineHeight:1.5,outline:'none',fontFamily:"'JetBrains Mono',monospace"},placeholder:'un valor por línea'}));};
     return h('div',null,this.modalHead('Catálogo de datos','Alimenta el autocompletado de los bloques rápidos y el contexto de la IA'),
-      h('div',{style:{padding:'20px',display:'flex',flexDirection:'column',gap:'16px'}},
-        h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'14px'}},groups.map(([k,label])=>h('label',{key:k,style:{display:'flex',flexDirection:'column',gap:'6px'}},
-          h('span',{style:{fontSize:'12px',fontWeight:600,color:'var(--dim)'}},label+' ('+((cat[k]||[]).length)+')'),
-          h('textarea',{value:(cat[k]||[]).join('\n'),onChange:e=>setGroup(k,e.target.value),className:'rb-scroll',style:{minHeight:'84px',resize:'vertical',padding:'9px 11px',background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:'9px',color:'var(--text)',fontSize:'12px',lineHeight:1.5,outline:'none',fontFamily:"'JetBrains Mono',monospace"},placeholder:'un valor por línea'})))),
-        h('div',{style:{display:'flex',justifyContent:'flex-end'}},this.btn({icon:'check',label:'Guardar catálogo',variant:'primary',onClick:async()=>{try{await this.api('PUT','/catalog',this.state.catalog);this.setState({modal:null});this.toast('Catálogo guardado');}catch(e){this.toast(e.message,'err');}}}))));
+      h('div',{style:{padding:'20px',display:'flex',flexDirection:'column',gap:'14px'}},
+        h('div',{style:{display:'flex',gap:'8px',alignItems:'center',flexWrap:'wrap'}},
+          h('div',{style:{position:'relative',flex:1,minWidth:'200px'}},
+            h('span',{style:{position:'absolute',left:'11px',top:'50%',transform:'translateY(-50%)',color:'var(--faint)',display:'flex'}},this.icon('search',15)),
+            h('input',{value:this.state.catSearch,onChange:e=>this.setState({catSearch:e.target.value}),placeholder:'Buscar grupo o valor…',style:{width:'100%',padding:'9px 11px 9px 34px',background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:'9px',color:'var(--text)',fontSize:'13px',outline:'none'}})),
+          this.state.catGroupInput!=null
+            ?h('div',{style:{display:'flex',gap:'6px'}},h('input',{autoFocus:true,value:this.state.catGroupInput,onChange:e=>this.setState({catGroupInput:e.target.value}),onKeyDown:e=>{if(e.key==='Enter')this.addCatGroup();if(e.key==='Escape')this.setState({catGroupInput:null});},placeholder:'Nombre del grupo…',style:{padding:'8px 10px',background:'var(--bg2)',border:'1px solid var(--amber)',borderRadius:'8px',color:'var(--text)',fontSize:'12.5px',outline:'none'}}),this.btn({icon:'check',variant:'primary',pad:'7px 9px',title:'Crear',onClick:()=>this.addCatGroup()}))
+            :this.btn({icon:'plus',label:'Nuevo grupo',variant:'ghost',pad:'8px 11px',onClick:()=>this.setState({catGroupInput:''})})),
+        shown.length?h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'14px'}},shown.map(groupCard))
+          :h('div',{style:{textAlign:'center',color:'var(--faint)',fontSize:'13px',padding:'20px'}},'Sin coincidencias'),
+        h('div',{style:{display:'flex',justifyContent:'flex-end'}},this.btn({icon:'check',label:'Guardar catálogo',variant:'primary',onClick:async()=>{try{await this.api('PUT','/catalog',this.state.catalog);this.setState({modal:null,catSearch:''});this.toast('Catálogo guardado');}catch(e){this.toast(e.message,'err');}}}))));
   }
   modalRepSettings(){const h=React.createElement;const s=this.state;const sim=s.repSimMin!=null;const notif=(typeof Notification!=='undefined')?Notification.permission:'unsupported';
     return h('div',null,this.modalHead('Ajustes de reportes','notificaciones y prueba de horario'),
@@ -1090,7 +1147,8 @@ class Component extends DCLogic{
         row('{var}','Valor único. Aparece un campo de texto (o fecha si el nombre contiene "fecha").',"WHERE gerencia = '{gerencia}'"),
         row('{var[]}',"Lista con comillas. Campo con chips y botón +. Se expande a 'a','b','c'.","WHERE marca IN ({marcas[]})   →   IN ('X','Y','Z')"),
         row('{var[#]}','Lista numérica (sin comillas). Se expande a 1,2,3.',"WHERE id IN ({ids[#]})   →   IN (1,2,3)"),
-        row('{#var} … {/var}','Repite el bloque por cada valor de la lista var. Dentro: {.} = valor actual, {@i} = número de orden.',"CASE\n{#estados}\n  WHEN e = '{.}' THEN {@i}\n{/estados}\nEND"),
+        row('{#var} … {/var}','Repite el bloque por cada valor de la lista var. Dentro: {.} = valor actual, {@i} = número de orden, y {.n} = nombre del valor (activa "con nombre" en la lista para dárselo).',"CASE\n{#estados}\n  WHEN e = '{.}' THEN {@i}\n{/estados}\nEND"),
+        row('{.n}','Dentro de un {#var}, el nombre del valor actual (con el toggle "con nombre" activo). Ideal para el alias de cada columna.',"{#grupos_id}\n ,sum(case when g='{.}' then ce else 0 end) as {.n}\n{/grupos_id}"),
         row('{?var} … {/var}','Bloque opcional: solo aparece si {var} tiene valor. Ideal para filtros que a veces usas.',"WHERE 1=1\n{?gerencia}  AND gerencia = '{gerencia}'{/gerencia}"),
         h('div',{style:{marginTop:'14px',fontSize:'11.5px',color:'var(--faint)',lineHeight:1.6}},'Tip: el ',h('b',null,'contexto para la IA'),' (abajo del SQL) y estos símbolos hacen que el Asistente te devuelva mejores queries.'),
         h('div',{style:{display:'flex',justifyContent:'flex-end',marginTop:'12px'}},this.btn({label:'Entendido',variant:'primary',onClick:()=>this.setState({modal:null})}))));
