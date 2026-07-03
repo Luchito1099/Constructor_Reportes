@@ -36,6 +36,7 @@ class Query(SQLModel, table=True):
     name: str = ""
     type: str = "query"           # "query" | "notebook"
     sql: str = ""
+    context: str = ""             # comentario/contexto para la IA
     params_json: str = "{}"       # valores rápidos guardados por parámetro
     extra_json: str = "{}"        # kpis/assembly/finalTable/viz para notebooks
     position: int = 0
@@ -142,6 +143,7 @@ def init_db() -> None:
 _MIGRATIONS = {
     "request": [("images_json", "TEXT DEFAULT '[]'")],
     "user": [("role", "TEXT DEFAULT 'viewer'"), ("permissions", "TEXT DEFAULT '[]'")],
+    "query": [("context", "TEXT DEFAULT ''")],
 }
 
 

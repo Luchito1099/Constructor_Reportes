@@ -100,11 +100,28 @@ sola en `backend/`.
 
 ---
 
+## Símbolos de plantilla (Constructor)
+
+En el SQL puedes usar estos símbolos; el panel de *Bloques rápidos* arma el campo adecuado
+y *Generar query* los reemplaza (botón **Sintaxis** en la app muestra esta ayuda):
+
+| Símbolo | Qué hace | Ejemplo |
+|---|---|---|
+| `{var}` | Valor único (texto o fecha) | `WHERE gerencia = '{gerencia}'` |
+| `{var[]}` | Lista con comillas (chips + botón `+`) → `'a','b','c'` | `IN ({marcas[]})` |
+| `{var[#]}` | Lista numérica → `1,2,3` | `IN ({ids[#]})` |
+| `{#var} … {/var}` | Repite el bloque por cada valor de la lista; dentro `{.}` = valor, `{@i}` = índice | `CASE {#estados} WHEN e='{.}' THEN {@i} {/estados} END` |
+| `{?var} … {/var}` | Bloque opcional: solo aparece si `{var}` tiene valor | `{?gerencia} AND gerencia='{gerencia}'{/gerencia}` |
+
+Además, cada query tiene un campo de **contexto para la IA** (debajo del SQL): describe qué
+hace o las reglas del negocio y el Asistente te dará mejores respuestas.
+
 ## Flujo del módulo Constructor
 
 1. **Banco (Base)** — crea/pega tus queries que ya jalan al 100%, en categorías.
-   Selecciona una y ajústala con **bloques rápidos** (rango de fechas, brandpack, gerencia)
-   o pídele el cambio al **Asistente IA**; pulsa *Generar query* para ver la query final.
+   Selecciona una y ajústala con **bloques rápidos** (rango de fechas, brandpack, gerencia,
+   listas con `+`, bloques que se repiten) o pídele el cambio al **Asistente IA**; pulsa
+   *Generar query* para ver la query final.
 2. **Colector** — la pill central va juntando las queries que marcas con *Añadir al
    colector*. Cuando tengas las que quieres, *Enviar a notebook*.
 3. **Notebook (Rompecabezas)** — las queries entran como piezas; *Cruzar con IA* arma la

@@ -41,8 +41,8 @@ def _touch(obj: SQLModel) -> None:
 
 # Campos que el cliente puede escribir por modelo (nunca id/user_id).
 WRITABLE = {
-    Query: {"category", "subcase", "name", "type", "sql", "params_json",
-            "extra_json", "position"},
+    Query: {"category", "subcase", "name", "type", "sql", "context",
+            "params_json", "extra_json", "position"},
     NotebookTemplate: {"name", "description", "structure_json"},
     OutputBlock: {"name", "kind", "code"},
     Report: {"name", "assembly_json"},
