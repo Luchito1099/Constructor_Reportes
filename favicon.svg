@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#16b6ac"/>
+      <stop offset="1" stop-color="#0e9a92"/>
+    </linearGradient>
+  </defs>
+  <!-- Tile teal redondeado (marca) -->
+  <rect x="4" y="4" width="92" height="92" rx="24" fill="url(#g)"/>
+  <!-- "L" = cilindro de base de datos (trazo vertical) + pie (base) -->
+  <g fill="#ffffff">
+    <!-- cuerpo del cilindro -->
+    <path d="M30 30 v29 a11 5 0 0 0 22 0 V30 z"/>
+    <!-- tapa superior -->
+    <ellipse cx="41" cy="30" rx="11" ry="5"/>
+    <!-- pie de la L -->
+    <rect x="30" y="58" width="42" height="12" rx="6"/>
+  </g>
+  <!-- anillos que sugieren la base de datos -->
+  <g fill="none" stroke="#0e9a92" stroke-width="2.6" stroke-linecap="round" opacity="0.55">
+    <path d="M30 41 a11 5 0 0 0 22 0"/>
+    <path d="M30 50 a11 5 0 0 0 22 0"/>
+  </g>
+</svg>
